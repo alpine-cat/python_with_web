@@ -35,19 +35,13 @@ class Shortly(object):
             loader=FileSystemLoader(template_path), autoescape=True
         )
         self.jinja_env.filters["hostname"] = get_hostname
-        self.logined = False
         self.url_map = Map(
             [
-                Rule("/home", endpoint="home"),
+                Rule("/", endpoint="home"),
                 Rule('/<short_id>', endpoint="follow_short_link"),
                 Rule('/create', endpoint="new_url"),
                 Rule('/<short_id>_details', endpoint="short_link_details"),
                 Rule('/list', endpoint='list_url'),
-                Rule('/', endpoint='login')
-                # TODO: Добавить ендпоинты на:
-                # - создание шортката
-                # - редирект по ссылке
-                # - детальную информацию о ссылке
             ]
         )
 
@@ -67,54 +61,43 @@ class Shortly(object):
 
     def wsgi_app(self, environ, start_response):
         request = Request(environ)
-        response = self.dispatch_request(request)
+        auth = request.authorization
+        if not auth or not self.check_auth(auth.username, auth.password):
+            response = self.auth_required(request)
+        else:
+            response = self.dispatch_request(request)
         return response(environ, start_response)
 
     def on_home(self, request):
-        if not self.logined:
-            return self.render_template("login.html")
         return self.render_template("homepage.html")
 
     def on_new_url(self, request):
         error = None
         url = ""
-        if request.method=="POST":
-                url = request.form['url']
-                if not is_valid_url(url):
-                        error = 'invalid url'
-                else:
-                        id = insert_url(self.redis, url)
-                        if type(id) == bytes:
-                            return redirect('%s_details' % id.decode('utf-8'))
-                        return redirect('/%s_details'%id)
-        # TODO: Проверить что метод для создания новой ссылки "POST"
-        # Проверить валидность ссылки используя is_valid_url
-        # Если ссылка верна - создать запись в базе и
-        # отправить пользователя на детальную информацию
-        # Если неверна - написать ошибку
-
+        if request.method == "POST":
+            url = request.form['url']
+            if not is_valid_url(url):
+                error = 'invalid url'
+            else:
+                id = insert_url(self.redis, url)
+                if type(id) == bytes:
+                    return redirect('%s_details' % id.decode('utf-8'))
+                return redirect('/%s_details' % id)
         return self.render_template("new_url.html", error=error, url=url)
 
     def on_follow_short_link(self, request, short_id):
-        # TODO: Достать из базы запись о ссылке по ее ид (get_url)
-        # если такого ид в базе нет то кинуть 404 (NotFount())
-        # заинкрементить переход по ссылке (increment_url)
         link_target = get_url(self.redis, short_id)
         if not link_target:
-                return NotFound()
+            return NotFound()
         increment_url(self.redis, short_id)
         return redirect(link_target)
 
     def on_short_link_details(self, request, short_id):
-        # TODO: Достать из базы запись о ссылке по ее ид (get_url)
-        # если такого ид в базе нет то кинуть 404 (NotFount())
         url = get_url(self.redis, short_id)
         if not url:
-                return NotFound()
+            return NotFound()
         click_count = get_count(self.redis, short_id)
-	
         link_target = "/"
-
         return self.render_template(
             "short_link_details.html",
             link_target=link_target,
@@ -123,24 +106,21 @@ class Shortly(object):
         )
 
     def on_list_url(self, request):
-        # TODO: ДЗ
         error = None
         list_urls = get_list_urls(self.redis)
         if not list_urls:
             error = "no urls found"
         return self.render_template("list_url.html", error=error, url_list=list_urls)
 
-    def on_login(self, request):
-        if not self.logined:
-            if request.method == 'POST':
-                login = request.form['login']
-                password = request.form['password']
-                if login == 'admin':
-                    if password == 'admin':
-                        self.logined = True
-                        return self.render_template("homepage.html")
-            return self.render_template("login.html")
-        return self.render_template("homepage.html")
+    def check_auth(self, username, password):
+        return username == 'admin' and password == 'admin'
+
+    def auth_required(self, request):
+        return Response(
+            "Please log-in to continue",
+            401,
+            {"WWW-Authenticate": 'Basic realm="login required"'}
+        )
 
     def error_404(self):
         response = self.render_template("404.html")
