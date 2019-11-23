@@ -24,9 +24,9 @@ def get_count(redis, short_id):
 
 
 def get_list_urls(redis):
-    url_num = redis.get("last-url-id").decode('utf-8')
+    url_num = int(redis.get("last-url-id"))
     list_urls = list()
-    for id in range(1, int(url_num)):
+    for id in range(1, url_num+1):
         d_url = dict()
         short_id = str(id)
         d_url['id'] = short_id

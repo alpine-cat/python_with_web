@@ -35,14 +35,15 @@ class Shortly(object):
             loader=FileSystemLoader(template_path), autoescape=True
         )
         self.jinja_env.filters["hostname"] = get_hostname
-
+        self.logined = False
         self.url_map = Map(
             [
-                Rule("/", endpoint="home"),
+                Rule("/home", endpoint="home"),
                 Rule('/<short_id>', endpoint="follow_short_link"),
                 Rule('/create', endpoint="new_url"),
                 Rule('/<short_id>_details', endpoint="short_link_details"),
-                Rule('/list', endpoint='list_url')
+                Rule('/list', endpoint='list_url'),
+                Rule('/', endpoint='login')
                 # TODO: Добавить ендпоинты на:
                 # - создание шортката
                 # - редирект по ссылке
@@ -70,6 +71,8 @@ class Shortly(object):
         return response(environ, start_response)
 
     def on_home(self, request):
+        if not self.logined:
+            return self.render_template("login.html")
         return self.render_template("homepage.html")
 
     def on_new_url(self, request):
@@ -81,7 +84,9 @@ class Shortly(object):
                         error = 'invalid url'
                 else:
                         id = insert_url(self.redis, url)
-                        return redirect('/%s_details'%str(id))
+                        if type(id) == bytes:
+                            return redirect('%s_details' % id.decode('utf-8'))
+                        return redirect('/%s_details'%id)
         # TODO: Проверить что метод для создания новой ссылки "POST"
         # Проверить валидность ссылки используя is_valid_url
         # Если ссылка верна - создать запись в базе и
@@ -124,6 +129,18 @@ class Shortly(object):
         if not list_urls:
             error = "no urls found"
         return self.render_template("list_url.html", error=error, url_list=list_urls)
+
+    def on_login(self, request):
+        if not self.logined:
+            if request.method == 'POST':
+                login = request.form['login']
+                password = request.form['password']
+                if login == 'admin':
+                    if password == 'admin':
+                        self.logined = True
+                        return self.render_template("homepage.html")
+            return self.render_template("login.html")
+        return self.render_template("homepage.html")
 
     def error_404(self):
         response = self.render_template("404.html")
